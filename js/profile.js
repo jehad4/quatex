@@ -1,129 +1,87 @@
-// profile.js
-import { auth, db } from './firebase.js';
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-auth.js";
-import { doc, getDoc, collection, query, where, getDocs, orderBy } from "https://www.gstatic.com/firebasejs/10.11.0/firebase-firestore.js";
-
-const profileContainer = document.getElementById('profileContainer');
-const loadingSpinner = document.getElementById('loadingSpinner');
-const alertContainer = document.getElementById('alertContainer');
-let loggedInUserId = null;
-
-document.addEventListener('DOMContentLoaded', initProfile);
-
-async function initProfile() {
-  try {
-    showLoading(true);
-
-    loggedInUserId = await getCurrentUserId();
-    const urlParams = new URLSearchParams(window.location.search);
-    const userId = urlParams.get('id') || loggedInUserId;
-
-    if (!userId) {
-      window.location.href = 'login.html';
-      return;
-    }
-
-    // Get user data
-    const userRef = doc(db, "users", userId);
-    const userSnap = await getDoc(userRef);
-    if (!userSnap.exists()) throw new Error('User not found');
-
-    // Get posts
-    const postsQuery = query(
-      collection(db, "posts"),
-      where("authorId", "==", userId),
-      orderBy("createdAt", "desc")
-    );
-    const postSnap = await getDocs(postsQuery);
-    const posts = postSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-    // Render
-    renderProfile(userSnap.data(), userId, posts);
-
-  } catch (err) {
-    console.error(err);
-    showAlert('প্রোফাইল লোড করতে সমস্যা হয়েছে। পরে আবার চেষ্টা করুন।', 'error');
-    renderProfileError();
-  } finally {
-    showLoading(false);
-  }
-}
-
-function getCurrentUserId() {
-  return new Promise(resolve => {
-    onAuthStateChanged(auth, user => {
-      resolve(user ? user.uid : null);
-    });
-  });
-}
-
-function renderProfile(userData, userId, posts) {
-  let postsHTML = posts.length > 0 ? posts.map(post => `
-    <div class="post-card">
-      <div class="post-header">
-        <img src="${post.authorPhotoURL || 'https://via.placeholder.com/40'}" class="post-author-avatar">
-        <div class="post-meta">
-          <h3>${post.title || 'নামবিহীন পোস্ট'}</h3>
-          <small>${formatPostDate(post.createdAt)} | ${getCategoryName(post.category)}</small>
-        </div>
-      </div>
-      <p>${truncateContent(post.content)}</p>
-      <a href="post.html?id=${post.id}" class="read-more">পুরো পড়ুন</a>
-    </div>
-  `).join('') : `
-    <div class="no-posts">
-      <p>কোনো পোস্ট নেই</p>
-      ${loggedInUserId === userId ? `<a href="create-post.html">নতুন পোস্ট লিখুন</a>` : ''}
-    </div>
-  `;
-
+function renderProfile(userData, userId) {
   profileContainer.innerHTML = `
     <div class="profile-header">
-      <img src="${userData.photoURL || 'https://via.placeholder.com/150'}" class="profile-avatar">
-      <div>
+      <img src="${userData.photoURL || 'https://via.placeholder.com/150'}" 
+           alt="${userData.displayName || 'User'}" 
+           class="profile-avatar">
+      <div class="profile-info">
         <h2>${userData.displayName || 'ব্যবহারকারী'}</h2>
-        <p>${userData.email || ''}</p>
-        <p>পোস্ট: ${posts.length} | ভূমিকা: ${getRoleName(userData.role)} | যোগদান: ${formatDate(userData.joinedDate)}</p>
+        ${userData.email ? `<p class="profile-email">${userData.email}</p>` : ''}
+        <div class="profile-stats">
+          <div class="stat">
+            <span class="stat-value">${userData.postCount || 0}</span>
+            <span class="stat-label">পোস্ট</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">${getRoleName(userData.role)}</span>
+            <span class="stat-label">ভূমিকা</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value">${userData.joinedDate ? formatDate(userData.joinedDate) : 'অজানা'}</span>
+            <span class="stat-label">যোগদান</span>
+          </div>
+        </div>
       </div>
     </div>
-    <hr>
-    <h3>পোস্টসমূহ</h3>
-    ${postsHTML}
+    ${loggedInUserId === userId ? `
+    <div class="profile-actions">
+      <a href="edit-profile.html" class="edit-profile-btn">প্রোফাইল সম্পাদনা</a>
+    </div>
+    ` : ''}
   `;
 }
 
 function renderProfileError() {
-  profileContainer.innerHTML = `<p>প্রোফাইল লোড করা যায়নি</p>`;
+  profileContainer.innerHTML = `
+    <div class="profile-error">
+      <i class="fas fa-exclamation-circle"></i>
+      <p>প্রোফাইল লোড করা যায়নি</p>
+      <button onclick="window.location.reload()" class="retry-btn">
+        <i class="fas fa-sync-alt"></i> আবার চেষ্টা করুন
+      </button>
+    </div>
+  `;
 }
 
-function showLoading(show) {
-  if (loadingSpinner) loadingSpinner.style.display = show ? 'block' : 'none';
-}
+// In loadUserPosts function:
+postsContainer.innerHTML = `
+  <div class="no-posts">
+    <i class="fas fa-book-open"></i>
+    <p>এই ব্যবহারকারীর কোনো পোস্ট নেই</p>
+    ${loggedInUserId === userId ? `
+    <a href="create-post.html" class="cta-button">নতুন পোস্ট লিখুন</a>
+    ` : ''}
+  </div>
+`;
 
-function showAlert(message, type = 'error') {
-  const alert = document.createElement('div');
-  alert.className = `alert alert-${type}`;
-  alert.innerHTML = `<span>${message}</span>`;
-  alertContainer.appendChild(alert);
-  setTimeout(() => alert.remove(), 4000);
-}
-
-// Helpers
-function formatPostDate(ts) {
-  if (!ts?.toDate) return 'তারিখ নেই';
-  return ts.toDate().toLocaleDateString('bn-BD', { year: 'numeric', month: 'long', day: 'numeric' });
-}
-function formatDate(date) {
-  return date?.toDate ? date.toDate().toLocaleDateString('bn-BD') : 'অজানা';
-}
-function truncateContent(content, maxLength = 150) {
-  return content?.length > maxLength ? content.substring(0, maxLength) + '...' : content || '';
-}
-function getCategoryName(cat) {
-  const categories = { poetry: 'কবিতা', novel: 'উপন্যাস', short-story: 'ছোটগল্প' };
-  return categories[cat] || 'সাধারণ';
-}
-function getRoleName(role) {
-  const roles = { admin: 'প্রশাসক', author: 'লেখক', user: 'ব্যবহারকারী' };
-  return roles[role] || 'ব্যবহারকারী';
-}
+// And for each post:
+postsContainer.innerHTML += `
+  <div class="post-card">
+    <div class="post-header">
+      <img src="${post.authorPhotoURL || 'https://via.placeholder.com/40'}" 
+           alt="${post.authorName}" 
+           class="post-author-avatar">
+      <div class="post-meta">
+        <h3 class="post-title">${post.title || 'নামবিহীন পোস্ট'}</h3>
+        <div class="post-details">
+          <span class="post-category ${post.category || ''}">
+            ${getCategoryName(post.category)}
+          </span>
+          <span class="post-date">${postDate}</span>
+        </div>
+      </div>
+    </div>
+    <div class="post-content">
+      <p>${truncateContent(post.content)}</p>
+      <a href="post.html?id=${doc.id}" class="read-more">পুরো পড়ুন</a>
+    </div>
+    <div class="post-footer">
+      <span class="post-likes">
+        <i class="fas fa-heart"></i> ${post.likes?.length || 0}
+      </span>
+      <span class="post-comments">
+        <i class="fas fa-comment"></i> ${post.commentCount || 0}
+      </span>
+    </div>
+  </div>
+`;
